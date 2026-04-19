@@ -9,5 +9,4 @@ Datasets: https://www.kaggl.com/datasets/elemento/nyc-yellow-taxi-tip-da
           https://www.kagle.com//fivethirtyeight/uber-pickups-in-new-york-city
           https://www.kaggle.cm/datasets/adnananam/ride-sharing-platfrm-data
 
-
-
+Instructions: To run the code, you have to copy and paste it into google colab.
