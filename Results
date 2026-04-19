@@ -1,1 +1,44 @@
+--- Running Matching Algorithms for 20 Riders, 10 Drivers ---
+------------------------------------------------------------
+--- Running Brute Force ---
 
+### Brute Force Matching ###
+Time Taken: 0.000518 seconds
+Operations Count: 200
+Total Matches Made: 17
+Total Compatibility Score: 15914.21
+Unmatched Riders: 3
+Drivers Utilized: 10/10
+
+------------------------------------------------------------
+--- Running Greedy Matching ---
+
+### Greedy Matching ###
+Time Taken: 0.000380 seconds
+Operations Count: 400
+Total Matches Made: 17
+Total Compatibility Score: -inf
+Unmatched Riders: 3
+Drivers Utilized: 10/10
+
+------------------------------------------------------------
+--- Running Max Flow Matching (Conceptual) ---
+
+### Max Flow Matching ###
+Time Taken: 0.003435 seconds
+Operations Count: 248
+Total Matches Made: 17
+Total Compatibility Score: -inf
+Unmatched Riders: 3
+Drivers Utilized: 10/10
+
+------------------------------------------------------------
+--- Running Penguin Search Optimization-like Matching ---
+
+### Penguin Search Matching ###
+Time Taken: 0.127781 seconds
+Operations Count: 14807
+Total Matches Made: 17
+Total Compatibility Score: -inf
+Unmatched Riders: 3
+Drivers Utilized: 10/10
