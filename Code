@@ -1,1 +1,2081 @@
+Assume- Rider objects have an id, start_location (tuple (x,y)), end_location (tuple (x,y)), and passengers_needed (for driver capacity checking).
+Driver objects have an id, current_location (tuple (x,y)), capacity (max passengers), and available (boolean, or current passenger count).
+A compatibility_score function will determine how "good" a driver is for a rider. Higher is better. We'll use inverse distance, with penalties for capacity.
+First, let's set up the common structures and a compatibility function.
 
+import time
+import math
+import random
+import itertools # For brute force permutations/combinations
+
+# --- Helper Classes and Functions ---
+
+class Location:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    def __repr__(self):
+        return f"({self.x}, {self.y})"
+
+    def distance(self, other_location):
+        return math.sqrt((self.x - other_location.x)**2 + (self.y - other_location.y)**2)
+
+class Rider:
+    def __init__(self, id, start_location, end_location, passengers_needed=1):
+        self.id = id
+        self.start_location = start_location
+        self.end_location = end_location
+        self.passengers_needed = passengers_needed
+        self.matched_driver = None
+        self.is_matched = False
+
+    def __repr__(self):
+        return (f"Rider(ID={self.id}, Start={self.start_location}, "
+                f"End={self.end_location}, Needed={self.passengers_needed})")
+
+class Driver:
+    def __init__(self, id, current_location, capacity=4):
+        self.id = id
+        self.current_location = current_location
+        self.capacity = capacity
+        self.current_passengers = [] # List of Rider objects
+        self.is_available = True
+
+    @property
+    def remaining_capacity(self):
+        return self.capacity - sum(r.passengers_needed for r in self.current_passengers)
+
+    def assign_rider(self, rider):
+        if self.remaining_capacity >= rider.passengers_needed:
+            self.current_passengers.append(rider)
+            rider.is_matched = True
+            rider.matched_driver = self.id
+            if self.remaining_capacity == 0:
+                self.is_available = False
+            return True
+        return False
+
+    def remove_rider(self, rider):
+        if rider in self.current_passengers:
+            self.current_passengers.remove(rider)
+            rider.is_matched = False
+            rider.matched_driver = None
+            self.is_available = True # If capacity frees up
+            return True
+        return False
+
+    def reset(self):
+        self.current_passengers = []
+        self.is_available = True
+
+    def __repr__(self):
+        return (f"Driver(ID={self.id}, Loc={self.current_location}, "
+                f"Capacity={self.capacity}, Avail={self.remaining_capacity})")
+
+# --- Compatibility Score (Higher is better) ---
+def calculate_compatibility_score(rider, driver):
+    """
+    Calculates a score for matching a rider to a driver.
+    Score is higher for shorter distances. Penalizes insufficient capacity.
+    """
+    if driver.remaining_capacity < rider.passengers_needed:
+        return -float('inf') # Cannot fulfill request
+
+    # Distance from driver's current location to rider's start location
+    pickup_distance = driver.current_location.distance(rider.start_location)
+
+    # A simple score: inverse of distance. Add a small value to prevent division by zero.
+    # Consider also driver's route to rider's destination later, but for simplicity, just pickup.
+    score = 1000 - pickup_distance # Max score 1000 for 0 distance
+
+    # Add a penalty if driver is far, or bonus for close
+    # Can be more complex: ETA, driver rating, surge pricing, etc.
+    if pickup_distance > 50: # Arbitrary large distance
+        score -= 200
+
+    return max(0, score) # Score cannot be negative if compatible
+
+
+# --- Generic Timed Search Wrapper ---
+def timed_matching_algorithm(algorithm_func, riders, drivers, *args, **kwargs):
+    """
+    A wrapper to time and count operations for matching algorithms.
+    """
+    # Reset drivers and riders state for fair comparison
+    for d in drivers:
+        d.reset()
+    for r in riders:
+        r.is_matched = False
+        r.matched_driver = None
+
+    start_time = time.perf_counter()
+    matches, operations_count = algorithm_func(riders, drivers, *args, **kwargs)
+    end_time = time.perf_counter()
+
+    time_taken = end_time - start_time
+    return matches, operations_count, time_taken
+
+# --- Data Generation for Testing ---
+def generate_sample_data(num_riders, num_drivers, grid_size=100):
+    riders = []
+    drivers = []
+
+    for i in range(num_riders):
+        start = Location(random.uniform(0, grid_size), random.uniform(0, grid_size))
+        end = Location(random.uniform(0, grid_size), random.uniform(0, grid_size))
+        riders.append(Rider(f"R{i}", start, end, random.randint(1, 2)))
+
+    for i in range(num_drivers):
+        loc = Location(random.uniform(0, grid_size), random.uniform(0, grid_size))
+        drivers.append(Driver(f"D{i}", loc, random.randint(2, 4)))
+
+    return riders, drivers
+
+Now, let's implement the four algorithms.
+
+1. Brute Force Matching Algorithm
+Concept: This algorithm aims to find all possible valid individual (rider, driver) pairings and their scores. A true "brute force" for optimal global assignment would involve generating all permutations of assignments and picking the best, which is computationally infeasible for more than a handful of entities (N! complexity).
+For this exercise, we'll interpret "brute force" in the spirit of linear_search: systematically checking every possible (rider, driver) combination and recording its compatibility. It doesn't perform the final selection of an optimal set of matches, but rather exhaustively generates all potential candidates.
+
+def brute_force_matching(riders, drivers):
+    """
+    Brute force approach: Generates all possible valid individual rider-driver pairings
+    and their compatibility scores. It doesn't perform the final optimal assignment
+    due to extreme complexity for actual 'brute force global optimization'.
+    Instead, it exhaustively calculates compatibility for every single possible pair.
+    """
+    potential_matches = []
+    operations_count = 0
+
+    for rider in riders:
+        for driver in drivers:
+            operations_count += 1 # Counting each rider-driver comparison
+            score = calculate_compatibility_score(rider, driver)
+            if score > 0: # Only consider valid (non-negative) scores
+                potential_matches.append({
+                    "rider_id": rider.id,
+                    "driver_id": driver.id,
+                    "score": score,
+                    "rider_obj": rider,
+                    "driver_obj": driver
+                })
+
+    # The actual "matching" part for brute force would be to try all combinations
+    # of these potential_matches to find the optimal set, but that's factorial complexity.
+    # For demonstration, we'll return the list of all potential compatible pairs.
+    # A true brute-force optimization would be prohibitive.
+    # For now, we'll simply select the highest-scoring unique matches that are valid.
+    # This isn't truly 'brute force optimization' but rather 'brute force candidate generation'.
+
+    # To make it output a *set* of matches, we can pick the best non-conflicting ones,
+    # which starts to look like a greedy approach if we sort them.
+    # Let's clarify: Brute force here is *finding all potential 1-to-1 candidates*.
+    # If we want an *actual matching*, we need a selection strategy.
+    # Let's simplify to picking the best *single* match for each rider if available,
+    # respecting driver capacity, by sorting the potential matches.
+    # This makes it a hybrid, but demonstrates the generation of all candidates.
+
+    # Sort by score in descending order
+    potential_matches.sort(key=lambda x: x['score'], reverse=True)
+
+    final_matches = []
+    matched_rider_ids = set()
+    drivers_working_copy = {d.id: Driver(d.id, d.current_location, d.capacity) for d in drivers}
+    for d in drivers_working_copy.values():
+        d.current_passengers = [] # Ensure it's clean
+
+    for pm in potential_matches:
+        rider = pm['rider_obj']
+        driver_copy = drivers_working_copy[pm['driver_id']]
+
+        if rider.id not in matched_rider_ids and driver_copy.remaining_capacity >= rider.passengers_needed:
+            driver_copy.assign_rider(rider) # Assign to the copy
+            final_matches.append((pm['rider_obj'], pm['driver_obj'])) # Record original objects
+            matched_rider_ids.add(rider.id)
+
+    return final_matches, operations_count
+
+# --- Timed Brute Force ---
+def timed_brute_force_matching(riders, drivers):
+    return timed_matching_algorithm(brute_force_matching, riders, drivers)
+
+import matplotlib.pyplot as plt
+import numpy as np
+import time
+import math
+import random
+import itertools # For brute force permutations/combinations
+
+# --- Helper Classes and Functions (copied from qM8NJBGueoqP for self-containment) ---
+
+class Location:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    def __repr__(self):
+        return f"({self.x}, {self.y})"
+
+    def distance(self, other_location):
+        return math.sqrt((self.x - other_location.x)**2 + (self.y - other_location.y)**2)
+
+class Rider:
+    def __init__(self, id, start_location, end_location, passengers_needed=1):
+        self.id = id
+        self.start_location = start_location
+        self.end_location = end_location
+        self.passengers_needed = passengers_needed
+        self.matched_driver = None
+        self.is_matched = False
+
+    def __repr__(self):
+        return (f"Rider(ID={self.id}, Start={self.start_location}, "
+                f"End={self.end_location}, Needed={self.passengers_needed})")
+
+class Driver:
+    def __init__(self, id, current_location, capacity=4):
+        self.id = id
+        self.current_location = current_location
+        self.capacity = capacity
+        self.current_passengers = [] # List of Rider objects
+        self.is_available = True
+
+    @property
+    def remaining_capacity(self):
+        return self.capacity - sum(r.passengers_needed for r in self.current_passengers)
+
+    def assign_rider(self, rider):
+        if self.remaining_capacity >= rider.passengers_needed:
+            self.current_passengers.append(rider)
+            rider.is_matched = True
+            rider.matched_driver = self.id
+            if self.remaining_capacity == 0:
+                self.is_available = False
+            return True
+        return False
+
+    def remove_rider(self, rider):
+        if rider in self.current_passengers:
+            self.current_passengers.remove(rider)
+            rider.is_matched = False
+            rider.matched_driver = None
+            self.is_available = True # If capacity frees up
+            return True
+        return False
+
+    def reset(self):
+        self.current_passengers = []
+        self.is_available = True
+
+    def __repr__(self):
+        return (f"Driver(ID={self.id}, Loc={self.current_location}, "
+                f"Capacity={self.capacity}, Avail={self.remaining_capacity})")
+
+# --- Compatibility Score (Higher is better) ---
+def calculate_compatibility_score(rider, driver):
+    """
+    Calculates a score for matching a rider to a driver.
+    Score is higher for shorter distances. Penalizes insufficient capacity.
+    """
+    if driver.remaining_capacity < rider.passengers_needed:
+        return -float('inf') # Cannot fulfill request
+
+    # Distance from driver's current location to rider's start location
+    pickup_distance = driver.current_location.distance(rider.start_location)
+
+    # A simple score: inverse of distance. Add a small value to prevent division by zero.
+    # Consider also driver's route to rider's destination later, but for simplicity, just pickup.
+    score = 1000 - pickup_distance # Max score 1000 for 0 distance
+
+    # Add a penalty if driver is far, or bonus for close
+    # Can be more complex: ETA, driver rating, surge pricing, etc.
+    if pickup_distance > 50: # Arbitrary large distance
+        score -= 200
+
+    return max(0, score) # Score cannot be negative if compatible
+
+
+# --- Generic Timed Search Wrapper ---
+def timed_matching_algorithm(algorithm_func, riders, drivers, *args, **kwargs):
+    """
+    A wrapper to time and count operations for matching algorithms.
+    """
+    # Reset drivers and riders state for fair comparison
+    for d in drivers:
+        d.reset()
+    for r in riders:
+        r.is_matched = False
+        r.matched_driver = None
+
+    start_time = time.perf_counter()
+    matches, operations_count = algorithm_func(riders, drivers, *args, **kwargs)
+    end_time = time.perf_counter()
+
+    time_taken = end_time - start_time
+    return matches, operations_count, time_taken
+
+# --- Data Generation for Testing ---
+def generate_sample_data(num_riders, num_drivers, grid_size=100):
+    riders = []
+    drivers = []
+
+    for i in range(num_riders):
+        start = Location(random.uniform(0, grid_size), random.uniform(0, grid_size))
+        end = Location(random.uniform(0, grid_size), random.uniform(0, grid_size))
+        riders.append(Rider(f"R{i}", start, end, random.randint(1, 2)))
+
+    for i in range(num_drivers):
+        loc = Location(random.uniform(0, grid_size), random.uniform(0, grid_size))
+        drivers.append(Driver(f"D{i}", loc, random.randint(2, 4)))
+
+    return riders, drivers
+
+def generate_sample_data_best_case(num_riders, num_drivers, grid_size=100):
+    riders = []
+    drivers = []
+
+    # Create drivers in a small cluster
+    driver_locations = []
+    for i in range(num_drivers):
+        loc_x = random.uniform(grid_size*0.4, grid_size*0.6)
+        loc_y = random.uniform(grid_size*0.4, grid_size*0.6)
+        driver_locations.append(Location(loc_x, loc_y))
+        drivers.append(Driver(f"D{i}", driver_locations[-1], random.randint(3, 4))) # High capacity
+
+    # Create riders very close to drivers, ensuring high compatibility
+    for i in range(num_riders):
+        assigned_driver_loc = random.choice(driver_locations)
+        start = Location(assigned_driver_loc.x + random.uniform(-5, 5),
+                         assigned_driver_loc.y + random.uniform(-5, 5))
+        end = Location(random.uniform(0, grid_size), random.uniform(0, grid_size))
+        riders.append(Rider(f"R{i}", start, end, random.randint(1, 2))) # Low passenger need
+
+    return riders, drivers
+
+def generate_sample_data_worst_case(num_riders, num_drivers, grid_size=100):
+    riders = []
+    drivers = []
+
+    # Place riders in one corner
+    for i in range(num_riders):
+        start = Location(random.uniform(0, grid_size*0.2), random.uniform(0, grid_size*0.2)) # Bottom-left
+        end = Location(random.uniform(grid_size*0.8, grid_size), random.uniform(grid_size*0.8, grid_size)) # Top-right
+        riders.append(Rider(f"R{i}", start, end, random.randint(1, 2))) # Average passenger need
+
+    # Place drivers in the opposite corner with lower capacity
+    for i in range(num_drivers):
+        loc = Location(random.uniform(grid_size*0.8, grid_size), random.uniform(grid_size*0.8, grid_size)) # Top-right
+        drivers.append(Driver(f"D{i}", loc, random.randint(2, 3))) # Lower capacity
+
+    return riders, drivers
+
+# --- Brute Force Matching Algorithm (copied from 1DqBxzmkfihc for self-containment) ---
+def brute_force_matching(riders, drivers):
+    """
+    Brute force approach: Generates all possible valid individual rider-driver pairings
+    and their compatibility scores. It doesn't perform the final optimal assignment
+    due to extreme complexity for actual 'brute force global optimization'.
+    Instead, it exhaustively calculates compatibility for every single possible pair.
+    """
+    potential_matches = []
+    operations_count = 0
+
+    for rider in riders:
+        for driver in drivers:
+            operations_count += 1 # Counting each rider-driver comparison
+            score = calculate_compatibility_score(rider, driver)
+            if score > 0: # Only consider valid (non-negative) scores
+                potential_matches.append({
+                    "rider_id": rider.id,
+                    "driver_id": driver.id,
+                    "score": score,
+                    "rider_obj": rider,
+                    "driver_obj": driver
+                })
+
+    # To make it output a *set* of matches, we can pick the best non-conflicting ones,
+    # which starts to look like a greedy approach if we sort them.
+    # Let's clarify: Brute force here is *finding all potential 1-to-1 candidates*.
+    # If we want an *actual matching*, we need a selection strategy.
+    # Let's simplify to picking the best *single* match for each rider if available,
+    # respecting driver capacity, by sorting the potential matches.
+    # This makes it a hybrid, but demonstrates the generation of all candidates.
+
+    # Sort by score in descending order
+    potential_matches.sort(key=lambda x: x['score'], reverse=True)
+
+    final_matches = []
+    matched_rider_ids = set()
+    drivers_working_copy = {d.id: Driver(d.id, d.current_location, d.capacity) for d in drivers}
+    for d in drivers_working_copy.values():
+        d.current_passengers = [] # Ensure it's clean
+
+    for pm in potential_matches:
+        rider = pm['rider_obj']
+        driver_copy = drivers_working_copy[pm['driver_id']]
+
+        if rider.id not in matched_rider_ids and driver_copy.remaining_capacity >= rider.passengers_needed:
+            driver_copy.assign_rider(rider) # Assign to the copy
+            final_matches.append((pm['rider_obj'], pm['driver_obj'])) # Record original objects
+            matched_rider_ids.add(rider.id)
+
+    return final_matches, operations_count
+
+# --- Timed Brute Force ---
+def timed_brute_force_matching(riders, drivers):
+    return timed_matching_algorithm(brute_force_matching, riders, drivers)
+
+# --- Original content of QHJUMvsonVu9 below (now able to run) ---
+
+# Define a range of input sizes to test
+sizes_brute_force = np.arange(5, 405, 5) # Number of riders, drivers will be half of riders
+
+# Store results for brute force algorithm for average, best, and worst cases
+bf_avg_times_plot = []
+bf_avg_ops_plot = []
+bf_best_times_plot = []
+bf_best_ops_plot = []
+bf_worst_times_plot = []
+bf_worst_ops_plot = []
+
+print("--- Running simulations for various input sizes (Brute Force Matching) ---")
+for num_riders in sizes_brute_force:
+    num_drivers = num_riders // 2  # Keep drivers proportional to riders
+    if num_drivers == 0: num_drivers = 1 # Ensure at least one driver
+
+    # Average Case
+    riders_avg, drivers_avg = generate_sample_data(num_riders, num_drivers, grid_size=100)
+    _, ops_avg, time_avg = timed_brute_force_matching(riders_avg, drivers_avg)
+    bf_avg_times_plot.append(time_avg)
+    bf_avg_ops_plot.append(ops_avg)
+
+    # Best Case
+    riders_best, drivers_best = generate_sample_data_best_case(num_riders, num_drivers, grid_size=100)
+    _, ops_best, time_best = timed_brute_force_matching(riders_best, drivers_best)
+    bf_best_times_plot.append(time_best)
+    bf_best_ops_plot.append(ops_best)
+
+    # Worst Case
+    riders_worst, drivers_worst = generate_sample_data_worst_case(num_riders, num_drivers, grid_size=100)
+    _, ops_worst, time_worst = timed_brute_force_matching(riders_worst, drivers_worst)
+    bf_worst_times_plot.append(time_worst)
+    bf_worst_ops_plot.append(ops_worst)
+print("--- Brute Force Matching Simulation complete ---")
+
+# Plotting results for Brute Force
+plt.figure(figsize=(14, 6))
+
+# Plot Time Complexity
+plt.subplot(1, 2, 1) # 1 row, 2 columns, first plot
+plt.plot(sizes_brute_force, bf_avg_times_plot, 'o-', label='Brute Force Time (Average)')
+plt.plot(sizes_brute_force, bf_best_times_plot, 'o-', label='Brute Force Time (Best Case)')
+plt.plot(sizes_brute_force, bf_worst_times_plot, 'o-', label='Brute Force Time (Worst Case)')
+plt.xlabel('Number of Riders (Input Size)')
+plt.ylabel('Time Taken (seconds)')
+plt.title('Brute Force Algorithm Time Complexity')
+plt.legend()
+plt.grid(True)
+
+# Plot Operations Count
+plt.subplot(1, 2, 2) # 1 row, 2 columns, second plot
+plt.plot(sizes_brute_force, bf_avg_ops_plot, 'o-', label='Brute Force Operations (Average)')
+plt.plot(sizes_brute_force, bf_best_ops_plot, 'o-', label='Brute Force Operations (Best Case)')
+plt.plot(sizes_brute_force, bf_worst_ops_plot, 'o-', label='Brute Force Operations (Worst Case)')
+plt.xlabel('Number of Riders (Input Size)')
+plt.ylabel('Operations Count')
+plt.title('Brute Force Algorithm Operations Count')
+plt.legend()
+plt.grid(True)
+
+plt.tight_layout()
+plt.show()
+
+2. Greedy Matching Algorithm
+Concept: At each step, make the locally optimal choice. In this case, find the best available (rider, driver) pair, make that match, and then repeat with the remaining available riders and drivers.
+
+def greedy_matching(riders, drivers):
+    """
+    Greedy approach:
+    1. Calculate compatibility for all possible (rider, driver) pairs.
+    2. Sort these potential matches by score in descending order.
+    3. Iterate through the sorted list, making matches as long as both
+       rider and driver are available and capacity allows.
+    """
+    potential_matches_with_scores = []
+    operations_count = 0
+
+    # Step 1: Calculate all potential scores
+    for rider in riders:
+        for driver in drivers:
+            operations_count += 1
+            score = calculate_compatibility_score(rider, driver)
+            if score > 0:
+                potential_matches_with_scores.append((score, rider, driver))
+
+    # Step 2: Sort by score in descending order
+    potential_matches_with_scores.sort(key=lambda x: x[0], reverse=True)
+
+    final_matches = []
+
+    # We need a way to track availability and capacity during the greedy process.
+    # Create working copies or use flags on the original objects temporarily.
+    # Let's use the actual objects and revert them later (handled by timed_matching_algorithm).
+
+    for score, rider, driver in potential_matches_with_scores:
+        operations_count += 1 # Counting each potential match evaluation
+        if not rider.is_matched and driver.remaining_capacity >= rider.passengers_needed:
+            if driver.assign_rider(rider): # Try to assign
+                final_matches.append((rider, driver))
+            # If assign_rider returns False, it means capacity was just filled by another match
+
+    return final_matches, operations_count
+
+# --- Timed Greedy Matching ---
+def timed_greedy_matching(riders, drivers):
+    return timed_matching_algorithm(greedy_matching, riders, drivers)
+
+import matplotlib.pyplot as plt
+import numpy as np
+import time
+import math
+import random
+import itertools
+
+# --- Helper Classes and Functions (copied for self-containment) ---
+
+class Location:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    def __repr__(self):
+        return f"({self.x}, {self.y})"
+
+    def distance(self, other_location):
+        return math.sqrt((self.x - other_location.x)**2 + (self.y - other_location.y)**2)
+
+class Rider:
+    def __init__(self, id, start_location, end_location, passengers_needed=1):
+        self.id = id
+        self.start_location = start_location
+        self.end_location = end_location
+        self.passengers_needed = passengers_needed
+        self.matched_driver = None
+        self.is_matched = False
+
+    def __repr__(self):
+        return (f"Rider(ID={self.id}, Start={self.start_location}, "
+                f"End={self.end_location}, Needed={self.passengers_needed})")
+
+class Driver:
+    def __init__(self, id, current_location, capacity=4):
+        self.id = id
+        self.current_location = current_location
+        self.capacity = capacity
+        self.current_passengers = [] # List of Rider objects
+        self.is_available = True
+
+    @property
+    def remaining_capacity(self):
+        return self.capacity - sum(r.passengers_needed for r in self.current_passengers)
+
+    def assign_rider(self, rider):
+        if self.remaining_capacity >= rider.passengers_needed:
+            self.current_passengers.append(rider)
+            rider.is_matched = True
+            rider.matched_driver = self.id
+            if self.remaining_capacity == 0:
+                self.is_available = False
+            return True
+        return False
+
+    def remove_rider(self, rider):
+        if rider in self.current_passengers:
+            self.current_passengers.remove(rider)
+            rider.is_matched = False
+            rider.matched_driver = None
+            self.is_available = True # If capacity frees up
+            return True
+        return False
+
+    def reset(self):
+        self.current_passengers = []
+        self.is_available = True
+
+    def __repr__(self):
+        return (f"Driver(ID={self.id}, Loc={self.current_location}, "
+                f"Capacity={self.capacity}, Avail={self.remaining_capacity})")
+
+# --- Compatibility Score (Higher is better) ---
+def calculate_compatibility_score(rider, driver):
+    """
+    Calculates a score for matching a rider to a driver.
+    Score is higher for shorter distances. Penalizes insufficient capacity.
+    """
+    if driver.remaining_capacity < rider.passengers_needed:
+        return -float('inf') # Cannot fulfill request
+
+    # Distance from driver's current location to rider's start location
+    pickup_distance = driver.current_location.distance(rider.start_location)
+
+    # A simple score: inverse of distance. Add a small value to prevent division by zero.
+    # Consider also driver's route to rider's destination later, but for simplicity, just pickup.
+    score = 1000 - pickup_distance # Max score 1000 for 0 distance
+
+    # Add a penalty if driver is far, or bonus for close
+    # Can be more complex: ETA, driver rating, surge pricing, etc.
+    if pickup_distance > 50: # Arbitrary large distance
+        score -= 200
+
+    return max(0, score) # Score cannot be negative if compatible
+
+
+# --- Generic Timed Search Wrapper ---
+def timed_matching_algorithm(algorithm_func, riders, drivers, *args, **kwargs):
+    """
+    A wrapper to time and count operations for matching algorithms.
+    """
+    # Reset drivers and riders state for fair comparison
+    for d in drivers:
+        d.reset()
+    for r in riders:
+        r.is_matched = False
+        r.matched_driver = None
+
+    start_time = time.perf_counter()
+    matches, operations_count = algorithm_func(riders, drivers, *args, **kwargs)
+    end_time = time.perf_counter()
+
+    time_taken = end_time - start_time
+    return matches, operations_count, time_taken
+
+# --- Data Generation for Testing ---
+def generate_sample_data(num_riders, num_drivers, grid_size=100):
+    riders = []
+    drivers = []
+
+    for i in range(num_riders):
+        start = Location(random.uniform(0, grid_size), random.uniform(0, grid_size))
+        end = Location(random.uniform(0, grid_size), random.uniform(0, grid_size))
+        riders.append(Rider(f"R{i}", start, end, random.randint(1, 2)))
+
+    for i in range(num_drivers):
+        loc = Location(random.uniform(0, grid_size), random.uniform(0, grid_size))
+        drivers.append(Driver(f"D{i}", loc, random.randint(2, 4)))
+
+    return riders, drivers
+
+def generate_sample_data_best_case(num_riders, num_drivers, grid_size=100):
+    riders = []
+    drivers = []
+
+    # Create drivers in a small cluster
+    driver_locations = []
+    for i in range(num_drivers):
+        loc_x = random.uniform(grid_size*0.4, grid_size*0.6)
+        loc_y = random.uniform(grid_size*0.4, grid_size*0.6)
+        driver_locations.append(Location(loc_x, loc_y))
+        drivers.append(Driver(f"D{i}", driver_locations[-1], random.randint(3, 4))) # High capacity
+
+    # Create riders very close to drivers, ensuring high compatibility
+    for i in range(num_riders):
+        assigned_driver_loc = random.choice(driver_locations)
+        start = Location(assigned_driver_loc.x + random.uniform(-5, 5),
+                         assigned_driver_loc.y + random.uniform(-5, 5))
+        end = Location(random.uniform(0, grid_size), random.uniform(0, grid_size))
+        riders.append(Rider(f"R{i}", start, end, random.randint(1, 2))) # Low passenger need
+
+    return riders, drivers
+
+def generate_sample_data_worst_case(num_riders, num_drivers, grid_size=100):
+    riders = []
+    drivers = []
+
+    # Place riders in one corner
+    for i in range(num_riders):
+        start = Location(random.uniform(0, grid_size*0.2), random.uniform(0, grid_size*0.2)) # Bottom-left
+        end = Location(random.uniform(grid_size*0.8, grid_size), random.uniform(grid_size*0.8, grid_size)) # Top-right
+        riders.append(Rider(f"R{i}", start, end, random.randint(1, 2))) # Average passenger need
+
+    # Place drivers in the opposite corner with lower capacity
+    for i in range(num_drivers):
+        loc = Location(random.uniform(grid_size*0.8, grid_size), random.uniform(grid_size*0.8, grid_size)) # Top-right
+        drivers.append(Driver(f"D{i}", loc, random.randint(2, 3))) # Lower capacity
+
+    return riders, drivers
+
+# --- Greedy Matching Algorithm (copied for self-containment) ---
+def greedy_matching(riders, drivers):
+    """
+    Greedy approach:
+    1. Calculate compatibility for all possible (rider, driver) pairs.
+    2. Sort these potential matches by score in descending order.
+    3. Iterate through the sorted list, making matches as long as both
+       rider and driver are available and capacity allows.
+    """
+    potential_matches_with_scores = []
+    operations_count = 0
+
+    # Step 1: Calculate all potential scores
+    for rider in riders:
+        for driver in drivers:
+            operations_count += 1
+            score = calculate_compatibility_score(rider, driver)
+            if score > 0:
+                potential_matches_with_scores.append((score, rider, driver))
+
+    # Step 2: Sort by score in descending order
+    potential_matches_with_scores.sort(key=lambda x: x[0], reverse=True)
+
+    final_matches = []
+
+    for score, rider, driver in potential_matches_with_scores:
+        operations_count += 1 # Counting each potential match evaluation
+        if not rider.is_matched and driver.remaining_capacity >= rider.passengers_needed:
+            if driver.assign_rider(rider): # Try to assign
+                final_matches.append((rider, driver))
+
+    return final_matches, operations_count
+
+# --- Timed Greedy Matching (copied for self-containment) ---
+def timed_greedy_matching(riders, drivers):
+    return timed_matching_algorithm(greedy_matching, riders, drivers)
+
+# --- Original content of g4XOevIaoXFR below (now able to run) ---
+
+# Define a range of input sizes to test
+sizes_greedy = np.arange(5, 405, 5) # Number of riders, drivers will be half of riders
+
+# Store results for greedy algorithm for average, best, and worst cases
+greedy_avg_times_plot = []
+greedy_avg_ops_plot = []
+greedy_best_times_plot = []
+greedy_best_ops_plot = []
+greedy_worst_times_plot = []
+greedy_worst_ops_plot = []
+
+print("--- Running simulations for various input sizes (Greedy Matching) ---")
+for num_riders in sizes_greedy:
+    num_drivers = num_riders // 2  # Keep drivers proportional to riders
+    if num_drivers == 0: num_drivers = 1 # Ensure at least one driver
+
+    # Average Case
+    riders_avg, drivers_avg = generate_sample_data(num_riders, num_drivers, grid_size=100)
+    _, ops_avg, time_avg = timed_greedy_matching(riders_avg, drivers_avg)
+    greedy_avg_times_plot.append(time_avg)
+    greedy_avg_ops_plot.append(ops_avg)
+
+    # Best Case
+    riders_best, drivers_best = generate_sample_data_best_case(num_riders, num_drivers, grid_size=100)
+    _, ops_best, time_best = timed_greedy_matching(riders_best, drivers_best)
+    greedy_best_times_plot.append(time_best)
+    greedy_best_ops_plot.append(ops_best)
+
+    # Worst Case
+    riders_worst, drivers_worst = generate_sample_data_worst_case(num_riders, num_drivers, grid_size=100)
+    _, ops_worst, time_worst = timed_greedy_matching(riders_worst, drivers_worst)
+    greedy_worst_times_plot.append(time_worst)
+    greedy_worst_ops_plot.append(ops_worst)
+print("--- Greedy Matching Simulation complete ---")
+
+# Plotting results for Greedy Matching
+plt.figure(figsize=(14, 6))
+
+# Plot Time Complexity
+plt.subplot(1, 2, 1) # 1 row, 2 columns, first plot
+plt.plot(sizes_greedy, greedy_avg_times_plot, 'o-', label='Greedy Matching Time (Average)')
+plt.plot(sizes_greedy, greedy_best_times_plot, 'o-', label='Greedy Matching Time (Best Case)')
+plt.plot(sizes_greedy, greedy_worst_times_plot, 'o-', label='Greedy Matching Time (Worst Case)')
+plt.xlabel('Number of Riders (Input Size)')
+plt.ylabel('Time Taken (seconds)')
+plt.title('Greedy Matching Algorithm Time Complexity')
+plt.legend()
+plt.grid(True)
+
+# Plot Operations Count
+plt.subplot(1, 2, 2) # 1 row, 2 columns, second plot
+plt.plot(sizes_greedy, greedy_avg_ops_plot, 'o-', label='Greedy Matching Operations (Average)')
+plt.plot(sizes_greedy, greedy_best_ops_plot, 'o-', label='Greedy Matching Operations (Best Case)')
+plt.plot(sizes_greedy, greedy_worst_ops_plot, 'o-', label='Greedy Matching Operations (Worst Case)')
+plt.xlabel('Number of Riders (Input Size)')
+plt.ylabel('Operations Count')
+plt.title('Greedy Matching Algorithm Operations Count')
+plt.legend()
+plt.grid(True)
+
+plt.tight_layout()
+plt.show()
+
+3. Maximum Flow Matching Algorithm
+Concept: This problem can be modeled as a Maximum Bipartite Matching or Min-Cost Max-Flow problem.
+Create a source node S and a sink node T.
+Add an edge from S to each Rider node with capacity 1 (each rider needs one ride).
+Add an edge from each Driver node to T with capacity equal to the driver's capacity.
+Add an edge from each Rider node to each Driver node if they are compatible. This edge has capacity 1 (one rider per driver per edge) and a "cost" (e.g., negative of compatibility_score if minimizing cost, or just 1 if maximizing flow without cost).
+Finding the maximum flow from S to T will give us the maximum number of riders that can be matched. If we use a Min-Cost Max-Flow algorithm, we can optimize for the total compatibility score.
+Note: Implementing a full Max Flow algorithm from scratch is complex. For this example, I'll describe the graph construction and use a placeholder/conceptual MaxFlowSolver to demonstrate the logic, as a full implementation would be substantial.
+
+# For max flow, we'd typically use a library like networkx or implement a flow algorithm.
+# Since a full implementation is extensive, we'll illustrate the conceptual model
+# and provide a simplified solver for demonstration.
+
+class MaxFlowGraph:
+    def __init__(self):
+        self.graph = {} # adj_list: {node: {neighbor: {'capacity': X, 'flow': Y, 'cost': Z}}}
+        self.node_map = {} # To map actual objects to graph node IDs
+
+    def add_node(self, node_id, obj=None):
+        if node_id not in self.graph:
+            self.graph[node_id] = {}
+            if obj:
+                self.node_map[obj] = node_id
+
+    def add_edge(self, u, v, capacity, cost=0):
+        self.add_node(u)
+        self.add_node(v)
+        self.graph[u][v] = {'capacity': capacity, 'flow': 0, 'cost': cost}
+        # For residual graph in typical max flow, you'd add a reverse edge.
+        # Simplified for conceptual model.
+
+    def _find_path(self, source, sink, driver_id_to_obj_map, rider_id_to_obj_map):
+        """
+        A very simplified path finder for illustrative purposes.
+        In a real max-flow, this would be BFS/DFS on residual graph,
+        potentially using Bellman-Ford/SPFA for min-cost max-flow.
+        """
+        paths = []
+        # Try to find a simple path from source to sink.
+        # This is not a full Edmonds-Karp/Dinic/etc.
+        for rider_node_id, driver_edges in self.graph.items():
+            if not rider_node_id.startswith("R_"): continue # Only check rider nodes
+
+            for driver_node_id, edge_data in driver_edges.items():
+                if not driver_node_id.startswith("D_"): continue # Only check driver edges
+
+                if edge_data['capacity'] - edge_data['flow'] >= 1: # If capacity allows 1 rider
+                    # Check driver capacity to sink
+                    driver_to_sink_edge = self.graph[driver_node_id].get("T", None)
+                    if driver_to_sink_edge and driver_to_sink_edge['capacity'] - driver_to_sink_edge['flow'] >= 1:
+                        # Found a path S -> Rider -> Driver -> T
+                        paths.append({
+                            'rider_id': rider_node_id[2:], # Extract R ID
+                            'driver_id': driver_node_id[2:], # Extract D ID
+                            'score': -edge_data['cost'] # Convert cost back to score
+                        })
+        # Sort paths by score to prioritize better ones for simplified flow
+        paths.sort(key=lambda x: x['score'], reverse=True)
+        return paths
+
+    def solve_max_flow(self, source, sink, riders_map, drivers_map):
+        """
+        A simplified conceptual max-flow solver for demonstration.
+        It doesn't implement a true augmenting path algorithm.
+        Instead, it simulates making "best" matches until no more paths are found,
+        to illustrate how the graph structure is used.
+        """
+        matches = []
+        operations = 0
+
+        # Keep track of available capacity for drivers, and if riders are matched
+        drivers_current_capacity = {d.id: d.capacity for d in drivers_map.values()}
+        matched_riders_ids = set()
+
+        while True:
+            operations += 1
+            # Find a path: S -> R -> D -> T. In a real algo, this is BFS/DFS.
+            # Here, we'll conceptualize it as finding the best available (R,D) pair.
+
+            best_path_score = -float('inf')
+            best_match_candidate = None
+
+            for rider_id_node, driver_edges in self.graph.items():
+                if not rider_id_node.startswith("R_"): continue
+                rider_obj = riders_map[rider_id_node[2:]] # Get original rider obj
+
+                if rider_obj.id in matched_riders_ids:
+                    continue # Rider already matched
+
+                for driver_id_node, edge_data in driver_edges.items():
+                    if not driver_id_node.startswith("D_"): continue
+                    driver_obj = drivers_map[driver_id_node[2:]] # Get original driver obj
+
+                    # Check if this (rider, driver) edge is 'active' and has capacity for 1 rider
+                    # And if the driver-to-sink edge also has capacity
+                    if edge_data['capacity'] - edge_data['flow'] >= rider_obj.passengers_needed: # For 1 rider flow unit
+                        driver_sink_edge = self.graph[driver_id_node].get(sink)
+                        if driver_sink_edge and driver_sink_edge['capacity'] - driver_sink_edge['flow'] >= rider_obj.passengers_needed:
+
+                            current_score = -edge_data['cost'] # Max-Cost = Min-Negative-Cost
+
+                            # Check remaining capacity for the driver based on current flow
+                            if drivers_current_capacity[driver_obj.id] >= rider_obj.passengers_needed:
+                                if current_score > best_path_score:
+                                    best_path_score = current_score
+                                    best_match_candidate = (rider_obj, driver_obj, rider_id_node, driver_id_node, edge_data, driver_sink_edge)
+
+            if best_match_candidate is None:
+                break # No more augmenting paths (matches) found
+
+            # Apply the flow for the best match found
+            rider_obj, driver_obj, rider_node, driver_node, r_d_edge, d_t_edge = best_match_candidate
+
+            # Increment flow on rider->driver edge and driver->sink edge
+            r_d_edge['flow'] += rider_obj.passengers_needed
+            d_t_edge['flow'] += rider_obj.passengers_needed
+
+            # Update internal tracking
+            drivers_current_capacity[driver_obj.id] -= rider_obj.passengers_needed
+            matched_riders_ids.add(rider_obj.id)
+
+            matches.append((rider_obj, driver_obj))
+
+        return matches, operations
+
+
+def max_flow_matching(riders, drivers):
+    """
+    Max Flow approach: Models the problem as a min-cost max-flow problem.
+    This implementation uses a conceptual MaxFlowGraph and a simplified solver.
+    """
+    graph = MaxFlowGraph()
+    source = "S"
+    sink = "T"
+    operations_count = 0
+
+    # Maps for easy lookup
+    riders_map = {r.id: r for r in riders}
+    drivers_map = {d.id: d for d in drivers}
+
+    # Add source and sink
+    graph.add_node(source)
+    graph.add_node(sink)
+
+    # Edges from source to riders (capacity 1, each rider wants 1 ride)
+    for rider in riders:
+        graph.add_node(f"R_{rider.id}", rider)
+        graph.add_edge(source, f"R_{rider.id}", capacity=rider.passengers_needed, cost=0)
+        operations_count += 1
+
+    # Edges from drivers to sink (capacity = driver's max capacity)
+    for driver in drivers:
+        graph.add_node(f"D_{driver.id}", driver)
+        graph.add_edge(f"D_{driver.id}", sink, capacity=driver.capacity, cost=0)
+        operations_count += 1
+
+    # Edges from riders to drivers (capacity 1, cost = negative compatibility score)
+    # We want to maximize compatibility score, so we minimize negative score.
+    for rider in riders:
+        for driver in drivers:
+            operations_count += 1
+            score = calculate_compatibility_score(rider, driver)
+            if score > 0: # Only add edges for compatible pairs
+                # Min-cost flow algorithms minimize cost. To maximize score,
+                # we set the cost to -score.
+                graph.add_edge(f"R_{rider.id}", f"D_{driver.id}",
+                               capacity=rider.passengers_needed, # Capacity of 1 for this specific rider
+                               cost=-score)
+
+    # Solve the max-flow (or min-cost max-flow) problem
+    # The internal solver will simulate the flow process and count operations.
+    final_matches, solver_operations = graph.solve_max_flow(source, sink, riders_map, drivers_map)
+    operations_count += solver_operations
+
+    # Assign matched riders to drivers based on the flow
+    # (This is implicitly done by the simplified solver, but in a real system,
+    # you'd interpret the flow on R_i -> D_j edges)
+
+    # We need to make sure the original driver objects reflect the matches.
+    # The graph.solve_max_flow already constructs the `final_matches` list
+    # with the original rider and driver objects.
+    # We just need to apply the assignments to the actual objects for consistency.
+    for rider_obj, driver_obj in final_matches:
+        if not rider_obj.is_matched: # Avoid re-matching if already handled by solver logic
+            driver_obj.assign_rider(rider_obj)
+
+
+    return final_matches, operations_count
+
+# --- Timed Max Flow Matching ---
+def timed_max_flow_matching(riders, drivers):
+    return timed_matching_algorithm(max_flow_matching, riders, drivers)
+
+import matplotlib.pyplot as plt
+import numpy as np
+import time
+import math
+import random
+import itertools
+
+# --- Helper Classes and Functions (copied for self-containment) ---
+
+class Location:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    def __repr__(self):
+        return f"({self.x}, {self.y})"
+
+    def distance(self, other_location):
+        return math.sqrt((self.x - other_location.x)**2 + (self.y - other_location.y)**2)
+
+class Rider:
+    def __init__(self, id, start_location, end_location, passengers_needed=1):
+        self.id = id
+        self.start_location = start_location
+        self.end_location = end_location
+        self.passengers_needed = passengers_needed
+        self.matched_driver = None
+        self.is_matched = False
+
+    def __repr__(self):
+        return (f"Rider(ID={self.id}, Start={self.start_location}, "
+                f"End={self.end_location}, Needed={self.passengers_needed})")
+
+class Driver:
+    def __init__(self, id, current_location, capacity=4):
+        self.id = id
+        self.current_location = current_location
+        self.capacity = capacity
+        self.current_passengers = [] # List of Rider objects
+        self.is_available = True
+
+    @property
+    def remaining_capacity(self):
+        return self.capacity - sum(r.passengers_needed for r in self.current_passengers)
+
+    def assign_rider(self, rider):
+        if self.remaining_capacity >= rider.passengers_needed:
+            self.current_passengers.append(rider)
+            rider.is_matched = True
+            rider.matched_driver = self.id
+            if self.remaining_capacity == 0:
+                self.is_available = False
+            return True
+        return False
+
+    def remove_rider(self, rider):
+        if rider in self.current_passengers:
+            self.current_passengers.remove(rider)
+            rider.is_matched = False
+            rider.matched_driver = None
+            self.is_available = True # If capacity frees up
+            return True
+        return False
+
+    def reset(self):
+        self.current_passengers = []
+        self.is_available = True
+
+    def __repr__(self):
+        return (f"Driver(ID={self.id}, Loc={self.current_location}, "
+                f"Capacity={self.capacity}, Avail={self.remaining_capacity})")
+
+# --- Compatibility Score (Higher is better) ---
+def calculate_compatibility_score(rider, driver):
+    """
+    Calculates a score for matching a rider to a driver.
+    Score is higher for shorter distances. Penalizes insufficient capacity.
+    """
+    if driver.remaining_capacity < rider.passengers_needed:
+        return -float('inf') # Cannot fulfill request
+
+    # Distance from driver's current location to rider's start location
+    pickup_distance = driver.current_location.distance(rider.start_location)
+
+    # A simple score: inverse of distance. Add a small value to prevent division by zero.
+    # Consider also driver's route to rider's destination later, but for simplicity, just pickup.
+    score = 1000 - pickup_distance # Max score 1000 for 0 distance
+
+    # Add a penalty if driver is far, or bonus for close
+    # Can be more complex: ETA, driver rating, surge pricing, etc.
+    if pickup_distance > 50: # Arbitrary large distance
+        score -= 200
+
+    return max(0, score) # Score cannot be negative if compatible
+
+
+# --- Generic Timed Search Wrapper ---
+def timed_matching_algorithm(algorithm_func, riders, drivers, *args, **kwargs):
+    """
+    A wrapper to time and count operations for matching algorithms.
+    """
+    # Reset drivers and riders state for fair comparison
+    for d in drivers:
+        d.reset()
+    for r in riders:
+        r.is_matched = False
+        r.matched_driver = None
+
+    start_time = time.perf_counter()
+    matches, operations_count = algorithm_func(riders, drivers, *args, **kwargs)
+    end_time = time.perf_counter()
+
+    time_taken = end_time - start_time
+    return matches, operations_count, time_taken
+
+# --- Data Generation for Testing ---
+def generate_sample_data(num_riders, num_drivers, grid_size=100):
+    riders = []
+    drivers = []
+
+    for i in range(num_riders):
+        start = Location(random.uniform(0, grid_size), random.uniform(0, grid_size))
+        end = Location(random.uniform(0, grid_size), random.uniform(0, grid_size))
+        riders.append(Rider(f"R{i}", start, end, random.randint(1, 2)))
+
+    for i in range(num_drivers):
+        loc = Location(random.uniform(0, grid_size), random.uniform(0, grid_size))
+        drivers.append(Driver(f"D{i}", loc, random.randint(2, 4)))
+
+    return riders, drivers
+
+def generate_sample_data_best_case(num_riders, num_drivers, grid_size=100):
+    riders = []
+    drivers = []
+
+    # Create drivers in a small cluster
+    driver_locations = []
+    for i in range(num_drivers):
+        loc_x = random.uniform(grid_size*0.4, grid_size*0.6)
+        loc_y = random.uniform(grid_size*0.4, grid_size*0.6)
+        driver_locations.append(Location(loc_x, loc_y))
+        drivers.append(Driver(f"D{i}", driver_locations[-1], random.randint(3, 4))) # High capacity
+
+    # Create riders very close to drivers, ensuring high compatibility
+    for i in range(num_riders):
+        assigned_driver_loc = random.choice(driver_locations)
+        start = Location(assigned_driver_loc.x + random.uniform(-5, 5),
+                         assigned_driver_loc.y + random.uniform(-5, 5))
+        end = Location(random.uniform(0, grid_size), random.uniform(0, grid_size))
+        riders.append(Rider(f"R{i}", start, end, random.randint(1, 2))) # Low passenger need
+
+    return riders, drivers
+
+def generate_sample_data_worst_case(num_riders, num_drivers, grid_size=100):
+    riders = []
+    drivers = []
+
+    # Place riders in one corner
+    for i in range(num_riders):
+        start = Location(random.uniform(0, grid_size*0.2), random.uniform(0, grid_size*0.2)) # Bottom-left
+        end = Location(random.uniform(grid_size*0.8, grid_size), random.uniform(grid_size*0.8, grid_size)) # Top-right
+        riders.append(Rider(f"R{i}", start, end, random.randint(1, 2))) # Average passenger need
+
+    # Place drivers in the opposite corner with lower capacity
+    for i in range(num_drivers):
+        loc = Location(random.uniform(grid_size*0.8, grid_size), random.uniform(grid_size*0.8, grid_size)) # Top-right
+        drivers.append(Driver(f"D{i}", loc, random.randint(2, 3))) # Lower capacity
+
+    return riders, drivers
+
+
+# --- Max Flow Graph and Algorithm (copied for self-containment) ---
+class MaxFlowGraph:
+    def __init__(self):
+        self.graph = {} # adj_list: {node: {neighbor: {'capacity': X, 'flow': Y, 'cost': Z}}}
+        self.node_map = {} # To map actual objects to graph node IDs
+
+    def add_node(self, node_id, obj=None):
+        if node_id not in self.graph:
+            self.graph[node_id] = {}
+            if obj:
+                self.node_map[obj] = node_id
+
+    def add_edge(self, u, v, capacity, cost=0):
+        self.add_node(u)
+        self.add_node(v)
+        self.graph[u][v] = {'capacity': capacity, 'flow': 0, 'cost': cost}
+        # For residual graph in typical max flow, you'd add a reverse edge.
+        # Simplified for conceptual model.
+
+    def _find_path(self, source, sink, driver_id_to_obj_map, rider_id_to_obj_map):
+        """
+        A very simplified path finder for illustrative purposes.
+        In a real max-flow, this would be BFS/DFS on residual graph,
+        potentially using Bellman-Ford/SPFA for min-cost max-flow.
+        """
+        paths = []
+        # Try to find a simple path from source to sink.
+        # This is not a full Edmonds-Karp/Dinic/etc.
+        for rider_node_id, driver_edges in self.graph.items():
+            if not rider_node_id.startswith("R_"): continue # Only check rider nodes
+
+            for driver_node_id, edge_data in driver_edges.items():
+                if not driver_node_id.startswith("D_"): continue # Only check driver edges
+
+                if edge_data['capacity'] - edge_data['flow'] >= 1: # If capacity allows 1 rider
+                    # Check driver capacity to sink
+                    driver_to_sink_edge = self.graph[driver_node_id].get("T", None)
+                    if driver_to_sink_edge and driver_to_sink_edge['capacity'] - driver_to_sink_edge['flow'] >= 1:
+                        # Found a path S -> Rider -> Driver -> T
+                        paths.append({
+                            'rider_id': rider_node_id[2:], # Extract R ID
+                            'driver_id': driver_node_id[2:], # Extract D ID
+                            'score': -edge_data['cost'] # Convert cost back to score
+                        })
+        # Sort paths by score to prioritize better ones for simplified flow
+        paths.sort(key=lambda x: x['score'], reverse=True)
+        return paths
+
+    def solve_max_flow(self, source, sink, riders_map, drivers_map):
+        """
+        A simplified conceptual max-flow solver for demonstration.
+        It doesn't implement a true augmenting path algorithm.
+        Instead, it simulates making "best" matches until no more paths are found,
+        to illustrate how the graph structure is used.
+
+        NOTE: This conceptual implementation is highly inefficient for larger inputs.
+        A proper max-flow algorithm (e.g., Edmonds-Karp, Dinic) would be much faster.
+        """
+        matches = []
+        operations = 0
+
+        # Keep track of available capacity for drivers, and if riders are matched
+        drivers_current_capacity = {d.id: d.capacity for d in drivers_map.values()}
+        matched_riders_ids = set()
+
+        while True:
+            operations += 1
+            # Find a path: S -> R -> D -> T. In a real algo, this is BFS/DFS.
+            # Here, we'll conceptualize it as finding the best available (R,D) pair.
+
+            best_path_score = -float('inf')
+            best_match_candidate = None
+
+            for rider_id_node, driver_edges in self.graph.items():
+                if not rider_id_node.startswith("R_"): continue
+                rider_obj = riders_map[rider_id_node[2:]] # Get original rider obj
+
+                if rider_obj.id in matched_riders_ids:
+                    continue # Rider already matched
+
+                for driver_id_node, edge_data in driver_edges.items():
+                    if not driver_id_node.startswith("D_"): continue
+                    driver_obj = drivers_map[driver_id_node[2:]] # Get original driver obj
+
+                    # Check if this (rider, driver) edge is 'active' and has capacity for 1 rider
+                    # And if the driver-to-sink edge also has capacity
+                    if edge_data['capacity'] - edge_data['flow'] >= rider_obj.passengers_needed: # For 1 rider flow unit
+                        driver_sink_edge = self.graph[driver_id_node].get(sink)
+                        if driver_sink_edge and driver_sink_edge['capacity'] - driver_sink_edge['flow'] >= rider_obj.passengers_needed:
+
+                            current_score = -edge_data['cost'] # Max-Cost = Min-Negative-Cost
+
+                            # Check remaining capacity for the driver based on current flow
+                            if drivers_current_capacity[driver_obj.id] >= rider_obj.passengers_needed:
+                                if current_score > best_path_score:
+                                    best_path_score = current_score
+                                    best_match_candidate = (rider_obj, driver_obj, rider_id_node, driver_id_node, edge_data, driver_sink_edge)
+
+            if best_match_candidate is None:
+                break # No more augmenting paths (matches) found
+
+            # Apply the flow for the best match found
+            rider_obj, driver_obj, rider_node, driver_node, r_d_edge, d_t_edge = best_match_candidate
+
+            # Increment flow on rider->driver edge and driver->sink edge
+            r_d_edge['flow'] += rider_obj.passengers_needed
+            d_t_edge['flow'] += rider_obj.passengers_needed
+
+            # Update internal tracking
+            drivers_current_capacity[driver_obj.id] -= rider_obj.passengers_needed
+            matched_riders_ids.add(rider_obj.id)
+
+            matches.append((rider_obj, driver_obj))
+
+        return matches, operations
+
+
+def max_flow_matching(riders, drivers):
+    """
+    Max Flow approach: Models the problem as a min-cost max-flow problem.
+    This implementation uses a conceptual MaxFlowGraph and a simplified solver.
+    """
+    graph = MaxFlowGraph()
+    source = "S"
+    sink = "T"
+    operations_count = 0
+
+    # Maps for easy lookup
+    riders_map = {r.id: r for r in riders}
+    drivers_map = {d.id: d for d in drivers}
+
+    # Add source and sink
+    graph.add_node(source)
+    graph.add_node(sink)
+
+    # Edges from source to riders (capacity 1, each rider wants 1 ride)
+    for rider in riders:
+        graph.add_node(f"R_{rider.id}", rider)
+        graph.add_edge(source, f"R_{rider.id}", capacity=rider.passengers_needed, cost=0)
+        operations_count += 1
+
+    # Edges from drivers to sink (capacity = driver's max capacity)
+    for driver in drivers:
+        graph.add_node(f"D_{driver.id}", driver)
+        graph.add_edge(f"D_{driver.id}", sink, capacity=driver.capacity, cost=0)
+        operations_count += 1
+
+    # Edges from riders to drivers (capacity 1, cost = negative compatibility score)
+    # We want to maximize compatibility score, so we minimize negative score.
+    for rider in riders:
+        for driver in drivers:
+            operations_count += 1
+            score = calculate_compatibility_score(rider, driver)
+            if score > 0: # Only add edges for compatible pairs
+                # Min-cost flow algorithms minimize cost. To maximize score,
+                # we set the cost to -score.
+                graph.add_edge(f"R_{rider.id}", f"D_{driver.id}",
+                               capacity=rider.passengers_needed, # Capacity of 1 for this specific rider
+                               cost=-score)
+
+    # Solve the max-flow (or min-cost max-flow) problem
+    # The internal solver will simulate the flow process and count operations.
+    final_matches, solver_operations = graph.solve_max_flow(source, sink, riders_map, drivers_map)
+    operations_count += solver_operations
+
+    # Assign matched riders to drivers based on the flow
+    # (This is implicitly done by the simplified solver, but in a real system,
+    # you'd interpret the flow on R_i -> D_j edges)
+
+    # We need to make sure the original driver objects reflect the matches.
+    # The graph.solve_max_flow already constructs the `final_matches` list
+    # with the original rider and driver objects.
+    # We just need to apply the assignments to the actual objects for consistency.
+    for rider_obj, driver_obj in final_matches:
+        if not rider_obj.is_matched: # Avoid re-matching if already handled by solver logic
+            driver_obj.assign_rider(rider_obj)
+
+
+    return final_matches, operations_count
+
+# --- Timed Max Flow Matching ---
+def timed_max_flow_matching(riders, drivers):
+    return timed_matching_algorithm(max_flow_matching, riders, drivers)
+
+# --- Main plotting logic for Max Flow ---
+
+# Define a range of input sizes to test
+# WARNING: The current Max Flow conceptual implementation is highly inefficient.
+# Running with a large input size range will lead to extremely long execution times.
+# For proper performance analysis of Max Flow, a dedicated and optimized library is needed.
+sizes_max_flow = np.arange(5, 405, 5) # Reverted to original range as per user request
+
+# Store results for max flow algorithm for average, best, and worst cases
+mf_avg_times_plot = []
+mf_avg_ops_plot = []
+mf_best_times_plot = []
+mf_best_ops_plot = []
+mf_worst_times_plot = []
+mf_worst_ops_plot = []
+
+print("--- Running simulations for various input sizes (Max Flow Matching) ---")
+print("!!! WARNING: This will take a very long time due to the conceptual and unoptimized Max Flow implementation. !!!")
+for num_riders in sizes_max_flow:
+    num_drivers = num_riders // 2 # Keep drivers proportional to riders
+    if num_drivers == 0: num_drivers = 1
+
+    # Average Case
+    riders_avg, drivers_avg = generate_sample_data(num_riders, num_drivers, grid_size=100)
+    _, ops_avg, time_avg = timed_max_flow_matching(riders_avg, drivers_avg)
+    mf_avg_times_plot.append(time_avg)
+    mf_avg_ops_plot.append(ops_avg)
+
+    # Best Case
+    riders_best, drivers_best = generate_sample_data_best_case(num_riders, num_drivers, grid_size=100)
+    _, ops_best, time_best = timed_max_flow_matching(riders_best, drivers_best)
+    mf_best_times_plot.append(time_best)
+    mf_best_ops_plot.append(ops_best)
+
+    # Worst Case
+    riders_worst, drivers_worst = generate_sample_data_worst_case(num_riders, num_drivers, grid_size=100)
+    _, ops_worst, time_worst = timed_max_flow_matching(riders_worst, drivers_worst)
+    mf_worst_times_plot.append(time_worst)
+    mf_worst_ops_plot.append(ops_worst)
+
+print("--- Max Flow Matching Simulation complete ---")
+
+# Plotting results for Max Flow Matching
+plt.figure(figsize=(14, 6))
+
+# Plot Time Complexity
+plt.subplot(1, 2, 1) # 1 row, 2 columns, first plot
+plt.plot(sizes_max_flow, mf_avg_times_plot, 'o-', label='Max Flow Matching Time (Average)')
+plt.plot(sizes_max_flow, mf_best_times_plot, 'o-', label='Max Flow Matching Time (Best Case)')
+plt.plot(sizes_max_flow, mf_worst_times_plot, 'o-', label='Max Flow Matching Time (Worst Case)')
+plt.xlabel('Number of Riders (Input Size)')
+plt.ylabel('Time Taken (seconds)')
+plt.title('Max Flow Matching Algorithm Time Complexity')
+plt.legend()
+plt.grid(True)
+
+# Plot Operations Count
+plt.subplot(1, 2, 2) # 1 row, 2 columns, second plot
+plt.plot(sizes_max_flow, mf_avg_ops_plot, 'o-', label='Max Flow Matching Operations (Average)')
+plt.plot(sizes_max_flow, mf_best_ops_plot, 'o-', label='Max Flow Matching Operations (Best Case)')
+plt.plot(sizes_max_flow, mf_worst_ops_plot, 'o-', label='Max Flow Matching Operations (Worst Case)')
+plt.xlabel('Number of Riders (Input Size)')
+plt.ylabel('Operations Count')
+plt.title('Max Flow Matching Algorithm Operations Count')
+plt.legend()
+plt.grid(True)
+
+plt.tight_layout()
+plt.show()
+
+4. Nature-Inspired (Penguin Search Optimization-like) Matching Algorithm
+Concept: Penguin Search Optimization (PSO) is a metaheuristic. For matching, we'll adapt its core idea: maintain a "population" of potential solutions (matchings), evaluate their "fitness" (total compatibility score), and iteratively improve them by introducing small "mutations" or "movements" towards better solutions. This is more akin to a local search or genetic algorithm with a population.
+Solution Representation: A list of (rider, driver) tuples (a matching).
+Fitness Function: Sum of calculate_compatibility_score for all pairs in a solution.
+Initialization: Create a population of N random valid matchings.
+Iteration (Search/Optimization):
+For each "penguin" (matching) in the population:
+Create a "neighbor" solution by applying a small perturbation (e.g., reassign a random rider, swap drivers for two riders).
+If the neighbor is better (higher fitness), replace the current penguin with the neighbor.
+Track the best matching found across all iterations.
+
+def calculate_matching_fitness(matching_solution):
+    """Calculates the total compatibility score for a given matching."""
+    total_score = 0
+    for rider, driver in matching_solution:
+        # We need to calculate this score using the *initial* state or carefully
+        # if the driver's current passengers affect the score. For simplicity,
+        # we'll assume `calculate_compatibility_score` is based on current state at match time.
+        # Here, for fitness, we just sum the original scores.
+        # This implies we assume the driver is empty when taking first rider.
+        # For multi-rider drivers, this needs more careful scoring (e.g., detour cost).
+        # Let's simplify: score is just for the given (rider, driver) pair.
+        total_score += calculate_compatibility_score(rider, driver)
+    return total_score
+
+
+def generate_random_valid_matching(riders, drivers, operations_count_ref):
+    """
+    Generates a single random valid matching.
+    Operations count is updated by reference.
+    """
+    current_matches = []
+    available_riders = list(riders)
+    available_drivers_map = {d.id: Driver(d.id, d.current_location, d.capacity) for d in drivers}
+    for d in available_drivers_map.values():
+        d.current_passengers = [] # Ensure it's clean
+
+    random.shuffle(available_riders) # Randomize order of riders
+
+    for rider in available_riders:
+        operations_count_ref[0] += 1
+
+        # Find drivers who can take this rider
+        eligible_drivers = [d_copy for d_id, d_copy in available_drivers_map.items()
+                            if d_copy.remaining_capacity >= rider.passengers_needed and
+                               calculate_compatibility_score(rider, d_copy) > 0]
+
+        if eligible_drivers:
+            # Pick a random eligible driver
+            driver_copy = random.choice(eligible_drivers)
+
+            # Find the original driver object to pass into the final match
+            original_driver = next(d for d in drivers if d.id == driver_copy.id)
+
+            # Assign rider to the *copy* to update its state for subsequent rider checks
+            driver_copy.assign_rider(rider)
+            current_matches.append((rider, original_driver))
+            # The rider is now considered "matched" for this solution generation process
+            # (though we don't set rider.is_matched on the original object yet).
+
+    return current_matches
+
+
+def perturb_matching(original_matching, all_riders, all_drivers, operations_count_ref):
+    """
+    Creates a new matching by perturbing an existing one.
+    E.g., unmatch a random pair and try to re-match the rider elsewhere,
+    or swap drivers for two riders.
+    """
+    new_matching = list(original_matching) # Start with a copy
+
+    if not new_matching: # If no matches, try to add one
+        return generate_random_valid_matching(all_riders, all_drivers, operations_count_ref)
+
+    # Option 1: Unmatch a random rider and try to rematch them
+    rider_to_unmatch, old_driver = random.choice(new_matching)
+    new_matching.remove((rider_to_unmatch, old_driver))
+
+    # Recreate driver states for the new_matching
+    temp_drivers_state = {d.id: Driver(d.id, d.current_location, d.capacity) for d in all_drivers}
+    for r, d_orig in new_matching:
+        temp_drivers_state[d_orig.id].assign_rider(r)
+
+    found_new_match = False
+
+    # Try to find a new driver for the un-matched rider
+    shuffled_drivers_ids = list(temp_drivers_state.keys())
+    random.shuffle(shuffled_drivers_ids)
+
+    for driver_id in shuffled_drivers_ids:
+        operations_count_ref[0] += 1
+        driver_copy = temp_drivers_state[driver_id]
+        original_driver = next(d for d in all_drivers if d.id == driver_id) # Get original driver object
+
+        if driver_copy.remaining_capacity >= rider_to_unmatch.passengers_needed and \
+           calculate_compatibility_score(rider_to_unmatch, driver_copy) > 0:
+
+            driver_copy.assign_rider(rider_to_unmatch) # Update copy's state
+            new_matching.append((rider_to_unmatch, original_driver))
+            found_new_match = True
+            break
+
+    if not found_new_match:
+        # If the rider couldn't be rematched, add them back with their old driver
+        # (This avoids losing a match if no better option is found, or just leaves them unmatched for this iteration)
+        # For simplicity, let's just leave the rider unmatched if no better alternative.
+        # Or, if we want to ensure *all* riders are always in the potential matching set:
+        # new_matching.append((rider_to_unmatch, old_driver))
+        pass
+
+    return new_matching
+
+
+def penguin_search_matching(riders, drivers, population_size=10, generations=50):
+    """
+    Penguin Search Optimization (PSO)-like approach for matching.
+    Uses an iterative, population-based improvement strategy.
+    """
+    operations_count = [0] # Use a list to allow modification in nested functions
+
+    # Step 1: Initialize population of random valid matchings
+    population = []
+    for _ in range(population_size):
+        population.append(generate_random_valid_matching(riders, drivers, operations_count))
+        operations_count[0] += 1 # Count population generation
+
+    # Evaluate initial population
+    best_matching = None
+    best_fitness = -float('inf')
+
+    for p_idx, matching in enumerate(population):
+        fitness = calculate_matching_fitness(matching)
+        if fitness > best_fitness:
+            best_fitness = fitness
+            best_matching = matching
+        # Store fitness with the matching for easier access
+        population[p_idx] = (matching, fitness)
+        operations_count[0] += 1 # Count fitness calculation
+
+    # Step 2: Iterate through generations
+    for gen in range(generations):
+        new_population = []
+        for matching, fitness in population:
+            operations_count[0] += 1 # Count iteration over population member
+
+            # "Penguin explores": Create a perturbed version (neighbor)
+            new_candidate_matching = perturb_matching(matching, riders, drivers, operations_count)
+            new_candidate_fitness = calculate_matching_fitness(new_candidate_matching)
+            operations_count[0] += 1 # Count fitness calculation
+
+            # "Penguin moves towards better food source": If new is better, replace
+            if new_candidate_fitness > fitness:
+                new_population.append((new_candidate_matching, new_candidate_fitness))
+            else:
+                new_population.append((matching, fitness)) # Keep old if no improvement
+
+            # Update global best
+            if new_candidate_fitness > best_fitness:
+                best_fitness = new_candidate_fitness
+                best_matching = new_candidate_matching
+
+        population = new_population # Update population for next generation
+
+    # Apply the best found matching to the original driver objects
+    # Reset drivers first (handled by timed_matching_algorithm, but good to be explicit here)
+    for driver in drivers:
+        driver.reset()
+    for rider in riders:
+        rider.is_matched = False
+        rider.matched_driver = None
+
+    if best_matching:
+        for rider, driver in best_matching:
+            driver.assign_rider(rider) # Assign to original driver objects
+
+    return best_matching, operations_count[0]
+
+# --- Timed Penguin Search Matching ---
+def timed_penguin_search_matching(riders, drivers, population_size=10, generations=50):
+    # Pass population_size and generations as *args to timed_matching_algorithm
+    return timed_matching_algorithm(penguin_search_matching, riders, drivers,
+                                    population_size=population_size, generations=generations)
+
+import matplotlib.pyplot as plt
+import numpy as np
+import time
+import math
+import random
+import itertools
+
+# --- Helper Classes and Functions (copied for self-containment) ---
+
+class Location:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    def __repr__(self):
+        return f"({self.x}, {self.y})"
+
+    def distance(self, other_location):
+        return math.sqrt((self.x - other_location.x)**2 + (self.y - other_location.y)**2)
+
+class Rider:
+    def __init__(self, id, start_location, end_location, passengers_needed=1):
+        self.id = id
+        self.start_location = start_location
+        self.end_location = end_location
+        self.passengers_needed = passengers_needed
+        self.matched_driver = None
+        self.is_matched = False
+
+    def __repr__(self):
+        return (f"Rider(ID={self.id}, Start={self.start_location}, "
+                f"End={self.end_location}, Needed={self.passengers_needed})")
+
+class Driver:
+    def __init__(self, id, current_location, capacity=4):
+        self.id = id
+        self.current_location = current_location
+        self.capacity = capacity
+        self.current_passengers = [] # List of Rider objects
+        self.is_available = True
+
+    @property
+    def remaining_capacity(self):
+        return self.capacity - sum(r.passengers_needed for r in self.current_passengers)
+
+    def assign_rider(self, rider):
+        if self.remaining_capacity >= rider.passengers_needed:
+            self.current_passengers.append(rider)
+            rider.is_matched = True
+            rider.matched_driver = self.id
+            if self.remaining_capacity == 0:
+                self.is_available = False
+            return True
+        return False
+
+    def remove_rider(self, rider):
+        if rider in self.current_passengers:
+            self.current_passengers.remove(rider)
+            rider.is_matched = False
+            rider.matched_driver = None
+            self.is_available = True # If capacity frees up
+            return True
+        return False
+
+    def reset(self):
+        self.current_passengers = []
+        self.is_available = True
+
+    def __repr__(self):
+        return (f"Driver(ID={self.id}, Loc={self.current_location}, "
+                f"Capacity={self.capacity}, Avail={self.remaining_capacity})")
+
+# --- Compatibility Score (Higher is better) ---
+def calculate_compatibility_score(rider, driver):
+    """
+    Calculates a score for matching a rider to a driver.
+    Score is higher for shorter distances. Penalizes insufficient capacity.
+    """
+    if driver.remaining_capacity < rider.passengers_needed:
+        return -float('inf') # Cannot fulfill request
+
+    # Distance from driver's current location to rider's start location
+    pickup_distance = driver.current_location.distance(rider.start_location)
+
+    # A simple score: inverse of distance. Add a small value to prevent division by zero.
+    # Consider also driver's route to rider's destination later, but for simplicity, just pickup.
+    score = 1000 - pickup_distance # Max score 1000 for 0 distance
+
+    # Add a penalty if driver is far, or bonus for close
+    # Can be more complex: ETA, driver rating, surge pricing, etc.
+    if pickup_distance > 50: # Arbitrary large distance
+        score -= 200
+
+    return max(0, score) # Score cannot be negative if compatible
+
+
+# --- Generic Timed Search Wrapper ---
+def timed_matching_algorithm(algorithm_func, riders, drivers, *args, **kwargs):
+    """
+    A wrapper to time and count operations for matching algorithms.
+    """
+    # Reset drivers and riders state for fair comparison
+    for d in drivers:
+        d.reset()
+    for r in riders:
+        r.is_matched = False
+        r.matched_driver = None
+
+    start_time = time.perf_counter()
+    matches, operations_count = algorithm_func(riders, drivers, *args, **kwargs)
+    end_time = time.perf_counter()
+
+    time_taken = end_time - start_time
+    return matches, operations_count, time_taken
+
+# --- Data Generation for Testing ---
+def generate_sample_data(num_riders, num_drivers, grid_size=100):
+    riders = []
+    drivers = []
+
+    for i in range(num_riders):
+        start = Location(random.uniform(0, grid_size), random.uniform(0, grid_size))
+        end = Location(random.uniform(0, grid_size), random.uniform(0, grid_size))
+        riders.append(Rider(f"R{i}", start, end, random.randint(1, 2)))
+
+    for i in range(num_drivers):
+        loc = Location(random.uniform(0, grid_size), random.uniform(0, grid_size))
+        drivers.append(Driver(f"D{i}", loc, random.randint(2, 4)))
+
+    return riders, drivers
+
+def generate_sample_data_best_case(num_riders, num_drivers, grid_size=100):
+    riders = []
+    drivers = []
+
+    # Create drivers in a small cluster
+    driver_locations = []
+    for i in range(num_drivers):
+        loc_x = random.uniform(grid_size*0.4, grid_size*0.6)
+        loc_y = random.uniform(grid_size*0.4, grid_size*0.6)
+        driver_locations.append(Location(loc_x, loc_y))
+        drivers.append(Driver(f"D{i}", driver_locations[-1], random.randint(3, 4))) # High capacity
+
+    # Create riders very close to drivers, ensuring high compatibility
+    for i in range(num_riders):
+        assigned_driver_loc = random.choice(driver_locations)
+        start = Location(assigned_driver_loc.x + random.uniform(-5, 5),
+                         assigned_driver_loc.y + random.uniform(-5, 5))
+        end = Location(random.uniform(0, grid_size), random.uniform(0, grid_size))
+        riders.append(Rider(f"R{i}", start, end, random.randint(1, 2))) # Low passenger need
+
+    return riders, drivers
+
+def generate_sample_data_worst_case(num_riders, num_drivers, grid_size=100):
+    riders = []
+    drivers = []
+
+    # Place riders in one corner
+    for i in range(num_riders):
+        start = Location(random.uniform(0, grid_size*0.2), random.uniform(0, grid_size*0.2)) # Bottom-left
+        end = Location(random.uniform(grid_size*0.8, grid_size), random.uniform(grid_size*0.8, grid_size)) # Top-right
+        riders.append(Rider(f"R{i}", start, end, random.randint(1, 2))) # Average passenger need
+
+    # Place drivers in the opposite corner with lower capacity
+    for i in range(num_drivers):
+        loc = Location(random.uniform(grid_size*0.8, grid_size), random.uniform(grid_size*0.8, grid_size)) # Top-right
+        drivers.append(Driver(f"D{i}", loc, random.randint(2, 3))) # Lower capacity
+
+    return riders, drivers
+
+
+# --- Penguin Search Optimization-like Matching Algorithm (copied for self-containment) ---
+def calculate_matching_fitness(matching_solution):
+    """Calculates the total compatibility score for a given matching."""
+    total_score = 0
+    for rider, driver in matching_solution:
+        # We need to calculate this score using the *initial* state or carefully
+        # if the driver's current passengers affect the score. For simplicity,
+        # we'll assume `calculate_compatibility_score` is based on current state at match time.
+        # Here, for fitness, we just sum the original scores.
+        # This implies we assume the driver is empty when taking first rider.
+        # For multi-rider drivers, this needs more careful scoring (e.g., detour cost).
+        # Let's simplify: score is just for the given (rider, driver) pair.
+        total_score += calculate_compatibility_score(rider, driver)
+    return total_score
+
+
+def generate_random_valid_matching(riders, drivers, operations_count_ref):
+    """
+    Generates a single random valid matching.
+    Operations count is updated by reference.
+    """
+    current_matches = []
+    available_riders = list(riders)
+    available_drivers_map = {d.id: Driver(d.id, d.current_location, d.capacity) for d in drivers}
+    for d in available_drivers_map.values():
+        d.current_passengers = [] # Ensure it's clean
+
+    random.shuffle(available_riders) # Randomize order of riders
+
+    for rider in available_riders:
+        operations_count_ref[0] += 1
+
+        # Find drivers who can take this rider
+        eligible_drivers = [d_copy for d_id, d_copy in available_drivers_map.items()
+                            if d_copy.remaining_capacity >= rider.passengers_needed and
+                               calculate_compatibility_score(rider, d_copy) > 0]
+
+        if eligible_drivers:
+            # Pick a random eligible driver
+            driver_copy = random.choice(eligible_drivers)
+
+            # Find the original driver object to pass into the final match
+            original_driver = next(d for d in drivers if d.id == driver_copy.id)
+
+            # Assign rider to the *copy* to update its state for subsequent rider checks
+            driver_copy.assign_rider(rider)
+            current_matches.append((rider, original_driver))
+            # The rider is now considered "matched" for this solution generation process
+            # (though we don't set rider.is_matched on the original object yet).
+
+    return current_matches
+
+
+def perturb_matching(original_matching, all_riders, all_drivers, operations_count_ref):
+    """
+    Creates a new matching by perturbing an existing one.
+    E.g., unmatch a random pair and try to re-match the rider elsewhere,
+    or swap drivers for two riders.
+    """
+    new_matching = list(original_matching) # Start with a copy
+
+    if not new_matching: # If no matches, try to add one
+        return generate_random_valid_matching(all_riders, all_drivers, operations_count_ref)
+
+    # Option 1: Unmatch a random rider and try to rematch them
+    rider_to_unmatch, old_driver = random.choice(new_matching)
+    new_matching.remove((rider_to_unmatch, old_driver))
+
+    # Recreate driver states for the new_matching
+    temp_drivers_state = {d.id: Driver(d.id, d.current_location, d.capacity) for d in all_drivers}
+    for r, d_orig in new_matching:
+        temp_drivers_state[d_orig.id].assign_rider(r)
+
+    found_new_match = False
+
+    # Try to find a new driver for the un-matched rider
+    shuffled_drivers_ids = list(temp_drivers_state.keys())
+    random.shuffle(shuffled_drivers_ids)
+
+    for driver_id in shuffled_drivers_ids:
+        operations_count_ref[0] += 1
+        driver_copy = temp_drivers_state[driver_id]
+        original_driver = next(d for d in all_drivers if d.id == driver_copy.id) # Get original driver object
+
+        if driver_copy.remaining_capacity >= rider_to_unmatch.passengers_needed and \
+           calculate_compatibility_score(rider_to_unmatch, driver_copy) > 0:
+
+            driver_copy.assign_rider(rider_to_unmatch) # Update copy's state
+            new_matching.append((rider_to_unmatch, original_driver))
+            found_new_match = True
+            break
+
+    if not found_new_match:
+        # If the rider couldn't be rematched, add them back with their old driver
+        # (This avoids losing a match if no better option is found, or just leaves them unmatched for this iteration)
+        # For simplicity, let's just leave the rider unmatched if no better alternative.
+        # Or, if we want to ensure *all* riders are always in the potential matching set:
+        # new_matching.append((rider_to_unmatch, old_driver))
+        pass
+
+    return new_matching
+
+
+def penguin_search_matching(riders, drivers, population_size=10, generations=50):
+    """
+    Penguin Search Optimization (PSO)-like approach for matching.
+    Uses an iterative, population-based improvement strategy.
+    """
+    operations_count = [0] # Use a list to allow modification in nested functions
+
+    # Step 1: Initialize population of random valid matchings
+    population = []
+    for _ in range(population_size):
+        population.append(generate_random_valid_matching(riders, drivers, operations_count))
+        operations_count[0] += 1 # Count population generation
+
+    # Evaluate initial population
+    best_matching = None
+    best_fitness = -float('inf')
+
+    for p_idx, matching in enumerate(population):
+        fitness = calculate_matching_fitness(matching)
+        if fitness > best_fitness:
+            best_fitness = fitness
+            best_matching = matching
+        # Store fitness with the matching for easier access
+        population[p_idx] = (matching, fitness)
+        operations_count[0] += 1 # Count fitness calculation
+
+    # Step 2: Iterate through generations
+    for gen in range(generations):
+        new_population = []
+        for matching, fitness in population:
+            operations_count[0] += 1 # Count iteration over population member
+
+            # "Penguin explores": Create a perturbed version (neighbor)
+            new_candidate_matching = perturb_matching(matching, riders, drivers, operations_count)
+            new_candidate_fitness = calculate_matching_fitness(new_candidate_matching)
+            operations_count[0] += 1 # Count fitness calculation
+
+            # "Penguin moves towards better food source": If new is better, replace
+            if new_candidate_fitness > fitness:
+                new_population.append((new_candidate_matching, new_candidate_fitness))
+            else:
+                new_population.append((matching, fitness)) # Keep old if no improvement
+
+            # Update global best
+            if new_candidate_fitness > best_fitness:
+                best_fitness = new_candidate_fitness
+                best_matching = new_candidate_matching
+
+        population = new_population # Update population for next generation
+
+    # Apply the best found matching to the original driver objects
+    # Reset drivers first (handled by timed_matching_algorithm, but good to be explicit here)
+    for driver in drivers:
+        driver.reset()
+    for rider in riders:
+        rider.is_matched = False
+        rider.matched_driver = None
+
+    if best_matching:
+        for rider, driver in best_matching:
+            driver.assign_rider(rider) # Assign to original driver objects
+
+    return best_matching, operations_count[0]
+
+# --- Timed Penguin Search Matching ---
+def timed_penguin_search_matching(riders, drivers, population_size=10, generations=50):
+    # Pass population_size and generations as *args to timed_matching_algorithm
+    return timed_matching_algorithm(penguin_search_matching, riders, drivers,
+                                    population_size=population_size, generations=generations)
+
+# --- Main plotting logic for Penguin Search ---
+
+# Define a range of input sizes to test
+sizes_penguin = np.arange(5, 405, 5) # Number of riders, drivers will be half of riders
+
+# Store results for penguin search algorithm for average, best, and worst cases
+ps_avg_times_plot = []
+ps_avg_ops_plot = []
+ps_best_times_plot = []
+ps_best_ops_plot = []
+ps_worst_times_plot = []
+ps_worst_ops_plot = []
+
+print("--- Running simulations for various input sizes (Penguin Search Matching) ---")
+for num_riders in sizes_penguin:
+    num_drivers = num_riders // 2 # Keep drivers proportional to riders
+    if num_drivers == 0: num_drivers = 1 # Ensure at least one driver
+
+    # Average Case
+    riders_avg, drivers_avg = generate_sample_data(num_riders, num_drivers, grid_size=100)
+    _, ops_avg, time_avg = timed_penguin_search_matching(riders_avg, drivers_avg)
+    ps_avg_times_plot.append(time_avg)
+    ps_avg_ops_plot.append(ops_avg)
+
+    # Best Case
+    riders_best, drivers_best = generate_sample_data_best_case(num_riders, num_drivers, grid_size=100)
+    _, ops_best, time_best = timed_penguin_search_matching(riders_best, drivers_best)
+    ps_best_times_plot.append(time_best)
+    ps_best_ops_plot.append(ops_best)
+
+    # Worst Case
+    riders_worst, drivers_worst = generate_sample_data_worst_case(num_riders, num_drivers, grid_size=100)
+    _, ops_worst, time_worst = timed_penguin_search_matching(riders_worst, drivers_worst)
+    ps_worst_times_plot.append(time_worst)
+    ps_worst_ops_plot.append(ops_worst)
+
+print("--- Penguin Search Matching Simulation complete ---")
+
+# Plotting results for Penguin Search
+plt.figure(figsize=(14, 6))
+
+# Plot Time Complexity
+plt.subplot(1, 2, 1) # 1 row, 2 columns, first plot
+plt.plot(sizes_penguin, ps_avg_times_plot, 'o-', label='Penguin Search Time (Average)')
+plt.plot(sizes_penguin, ps_best_times_plot, 'o-', label='Penguin Search Time (Best Case)')
+plt.plot(sizes_penguin, ps_worst_times_plot, 'o-', label='Penguin Search Time (Worst Case)')
+plt.xlabel('Number of Riders (Input Size)')
+plt.ylabel('Time Taken (seconds)')
+plt.title('Penguin Search Algorithm Time Complexity')
+plt.legend()
+plt.grid(True)
+
+# Plot Operations Count
+plt.subplot(1, 2, 2) # 1 row, 2 columns, second plot
+plt.plot(sizes_penguin, ps_avg_ops_plot, 'o-', label='Penguin Search Operations (Average)')
+plt.plot(sizes_penguin, ps_best_ops_plot, 'o-', label='Penguin Search Operations (Best Case)')
+plt.plot(sizes_penguin, ps_worst_ops_plot, 'o-', label='Penguin Search Operations (Worst Case)')
+plt.xlabel('Number of Riders (Input Size)')
+plt.ylabel('Operations Count')
+plt.title('Penguin Search Algorithm Operations Count')
+plt.legend()
+plt.grid(True)
+
+plt.tight_layout()
+plt.show()
+
+Testing and Comparison
+Let's generate some data and run these algorithms to see their performance characteristics.
+
+# --- Main Execution ---
+if __name__ == "__main__":
+    NUM_RIDERS = 20
+    NUM_DRIVERS = 10
+    GRID_SIZE = 100
+
+    print(f"--- Running Matching Algorithms for {NUM_RIDERS} Riders, {NUM_DRIVERS} Drivers ---")
+    print("-" * 60)
+
+    # Generate initial data (will be copied/reset for each algorithm run by timed_matching_algorithm)
+    original_riders, original_drivers = generate_sample_data(NUM_RIDERS, NUM_DRIVERS, GRID_SIZE)
+
+    # Function to print results
+    def print_results(algo_name, matches, ops_count, time_taken, riders_list, drivers_list):
+        total_score = calculate_matching_fitness(matches)
+        unmatched_riders = [r for r in riders_list if not r.is_matched]
+        matched_drivers_count = len(set(d.id for r, d in matches))
+
+        print(f"\n### {algo_name} ###")
+        print(f"Time Taken: {time_taken:.6f} seconds")
+        print(f"Operations Count: {ops_count}")
+        print(f"Total Matches Made: {len(matches)}")
+        print(f"Total Compatibility Score: {total_score:.2f}")
+        print(f"Unmatched Riders: {len(unmatched_riders)}")
+        print(f"Drivers Utilized: {matched_drivers_count}/{len(drivers_list)}")
+
+        # Optional: Print details of first few matches
+        # print("Sample Matches:")
+        # for i, (rider, driver) in enumerate(matches[:5]):
+        #     print(f"  Rider {rider.id} matched with Driver {driver.id} (Score: {calculate_compatibility_score(rider, driver):.2f})")
+        # if len(matches) > 5:
+        #     print("  ...")
+
+
+    # --- Run Brute Force ---
+    print("--- Running Brute Force ---")
+    bf_matches, bf_ops, bf_time = timed_brute_force_matching(original_riders, original_drivers)
+    print_results("Brute Force Matching", bf_matches, bf_ops, bf_time, original_riders, original_drivers)
+
+    # --- Run Greedy Matching ---
+    print("\n" + "-" * 60)
+    print("--- Running Greedy Matching ---")
+    greedy_matches, greedy_ops, greedy_time = timed_greedy_matching(original_riders, original_drivers)
+    print_results("Greedy Matching", greedy_matches, greedy_ops, greedy_time, original_riders, original_drivers)
+
+    # --- Run Max Flow Matching (Conceptual) ---
+    print("\n" + "-" * 60)
+    print("--- Running Max Flow Matching (Conceptual) ---")
+    mf_matches, mf_ops, mf_time = timed_max_flow_matching(original_riders, original_drivers)
+    print_results("Max Flow Matching", mf_matches, mf_ops, mf_time, original_riders, original_drivers)
+
+    # --- Run Penguin Search Optimization-like Matching ---
+    print("\n" + "-" * 60)
+    print("--- Running Penguin Search Optimization-like Matching ---")
+    # Adjust population_size and generations for larger problems or more exploration
+    penguin_matches, penguin_ops, penguin_time = timed_penguin_search_matching(original_riders, original_drivers,
+                                                                               population_size=20, generations=100)
+    print_results("Penguin Search Matching", penguin_matches, penguin_ops, penguin_time, original_riders, original_drivers)
