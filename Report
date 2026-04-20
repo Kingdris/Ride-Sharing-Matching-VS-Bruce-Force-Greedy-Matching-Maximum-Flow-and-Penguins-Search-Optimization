@@ -1,1 +1,3 @@
-
+Report:
+Google Colab was utilized to generate the algorithms and their empirical analysis: the provided empirical analysis of the linear search algorithm served as a template for their generation. 
+Initially, we experienced some drawbacks with team usage of Google Colab. While acessing it simulatneously from different computers, the changes we made often refused to sync and created conflicting save versions. In the end the algorithnms and analysis became the responsibility of one person to avoid overwriting progress.
