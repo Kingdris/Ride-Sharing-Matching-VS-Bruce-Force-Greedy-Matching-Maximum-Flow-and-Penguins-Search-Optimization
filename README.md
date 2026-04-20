@@ -10,3 +10,5 @@ Datasets: https://www.kaggl.com/datasets/elemento/nyc-yellow-taxi-tip-da
           https://www.kaggle.cm/datasets/adnananam/ride-sharing-platfrm-data
 
 Instructions: To run the code, you have to copy and paste it into google colab.
+
+Gen ai was used to generate the code and we used to it to proof read it so we can understand the code.
