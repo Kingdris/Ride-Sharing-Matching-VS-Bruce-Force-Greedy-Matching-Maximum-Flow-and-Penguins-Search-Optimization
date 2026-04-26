@@ -1,4 +1,4 @@
-Report:
+#_Report_
 Google Colab was utilized to generate the algorithms and their empirical analysis: the provided empirical analysis of the linear search algorithm served as a template for their generation. 
 The built in AI, google gemini, was able to implement the algorithms while measuring execution time, operation count, total rider-driver matches, compatability, and unmatched riders. 
 Some previously unexplored considerations and assumptions were required to fully develop our algorithms. We assumed that every passanger would have a randomly generated start location and 
