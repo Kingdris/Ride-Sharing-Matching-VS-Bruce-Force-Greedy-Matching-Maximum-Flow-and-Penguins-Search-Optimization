@@ -1,18 +1,18 @@
 Ride-Sharing Matching VS Bruce Force, Greedy Matching, Maximum Flow, and Peguins Search Optimaztion Report
 Idris King, Lewis Walldorf, Jacob Russell, Jason Brown
-Google Colab was utilized to generate the algorithms and their empirical analysis: the provided empirical analysis of the linear search algorithm served as a template for their generation. 
-The built in AI, google gemini, was able to implement the algorithms while measuring execution time, operation count, total rider-driver matches, compatability, and unmatched riders. 
-Some previously unexplored considerations and assumptions were required to fully develop our algorithms. We assumed that every passanger would have a randomly generated start location and 
-destination while drivers would have a car capacity and current location (randomly initialized). The compatibility is determined based on a combination of these factors, most important being 
-the distance between rider and driver. Initially, we experienced some drawbacks with team usage of Google Colab. While accessing it simultaneously from different computers, the changes we made 
-often refused to sync and created conflicting save versions. In the end the algorithmns and analysis became the responsibility of one person to avoid overwriting progress. Contrary to 
+Google Colab was utilized to generate the algorithms and their empirical analysis: the provided empirical analysis of the linear search algorithm served as a template for their generation.
+The built-in AI, Google Gemini, was able to implement the algorithms while measuring execution time, operation count, total rider-driver matches, compatibility, and unmatched riders.
+Some previously unexplored considerations and assumptions were required to fully develop our algorithms. We assumed that every passenger would have a randomly generated start location and
+destination while drivers would have a car capacity and current location (randomly initialized). The compatibility is determined based on a combination of these factors, most important being
+the distance between rider and driver. Initially, we experienced some drawbacks with team usage of Google Colab. While accessing it simultaneously from different computers, the changes we made
+often refused to sync and created conflicting saved versions. In the end the algorithms and analysis became the responsibility of one person to avoid overwriting progress. Contrary to
 expectation, based on derived time complexity of the algorithm, the greedy matching algorithm took less time than brute force method; even at greater input sizes.
 
-Most of the algorithms stayed relatively consistent in their time efficiencies with the exceptions of the maximum flow algorithm. While the brute force algorithm is there to use as a 
-baseline to compare our other algorithms against, it was interesting to see how maximum flow grew much quicker than the brute force and other algorithms. However, it is important to 
-note the purpose of the maximum flow algorithm is to find optimal matches while avoiding missing opportunities, like seen with greedy matching. On the other hand, the greedy matching 
-algorithm, while being the quickest algorithm, took drastically more operations compared to the others, at a staggering 160k operations at 400 riders, making it also the most expensive 
+Most of the algorithms stayed relatively consistent in their time efficiencies with the exceptions of the maximum flow algorithm. While the brute force algorithm is there to use as a
+baseline to compare our other algorithms against, it was interesting to see how maximum flow grew much quicker than the brute force and other algorithms. However, it is important to
+note the purpose of the maximum flow algorithm is to find optimal matches while avoiding missing opportunities, like seen with greedy matching. On the other hand, the greedy matching
+algorithm, while being the quickest algorithm, took drastically more operations compared to the others, at a staggering 160k operations at 400 riders, making it also the most expensive
 algorithm. Overall, aside from code complexities and operation expenses, the observed time efficiency compared very closely to its expected.
-The time complexity graphs varried slightly from the typical n^2, or n^3 graphs. There were intermitant spikes in runtime for successive increases in input size which became much more frequent
-as input sizes approached infinity. We believe that these spikes in runtime can be explained by the change in the global optimum for the addition one input/rider and the possibility of more 
+The time complexity graphs varied slightly from the typical n^2, or n^3 graphs. There were intermittent spikes in runtime for successive increases in input size which became much more frequent
+as input sizes approached infinity. We believe that these spikes in runtime can be explained by the change in the global optimum for the addition of one input/rider and the possibility of more
 unmatched riders which delays the algorithm further while it searches for matches which might not exist.
