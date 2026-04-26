@@ -4,8 +4,8 @@ Google Colab was utilized to generate the algorithms and their empirical analysi
 The built in AI, google gemini, was able to implement the algorithms while measuring execution time, operation count, total rider-driver matches, compatability, and unmatched riders. 
 Some previously unexplored considerations and assumptions were required to fully develop our algorithms. We assumed that every passanger would have a randomly generated start location and 
 destination while drivers would have a car capacity and current location (randomly initialized). The compatibility is determined based on a combination of these factors, most important being 
-the distance between rider and driver. Initially, we experienced some drawbacks with team usage of Google Colab. While acessing it simulatneously from different computers, the changes we made 
-often refused to sync and created conflicting save versions. In the end the algorithnms and analysis became the responsibility of one person to avoid overwriting progress. Contrary to 
+the distance between rider and driver. Initially, we experienced some drawbacks with team usage of Google Colab. While accessing it simultaneously from different computers, the changes we made 
+often refused to sync and created conflicting save versions. In the end the algorithmns and analysis became the responsibility of one person to avoid overwriting progress. Contrary to 
 expectation, based on derived time complexity of the algorithm, the greedy matching algorithm took less time than brute force method; even at greater input sizes.
 
 Most of the algorithms stayed relatively consistent in their time efficiencies with the exceptions of the maximum flow algorithm. While the brute force algorithm is there to use as a 
